@@ -49,3 +49,40 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Notify Success on Telegram
+        if: success()
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1 | sed 's/[_*\[\]()~`>#+=|{}.!-]/\\&/g')
+          TAGS=$(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+          
+          MESSAGE="✅ *Build Concluído com Sucesso*%0A%0A"
+          MESSAGE+="📦 *Repositório:* ${{ github.repository }}%0A"
+          MESSAGE+="🔀 *Branch:* ${{ github.ref_name }}%0A"
+          MESSAGE+="👤 *Autor:* ${{ github.actor }}%0A"
+          MESSAGE+="💬 *Commit:* ${COMMIT_MSG}%0A"
+          MESSAGE+="🔗 *Link:* https://github.com/${{ github.repository }}/commit/${{ github.sha }}%0A"
+          MESSAGE+="🏷️ *Tags:* ${TAGS}"
+          
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="7514981639" \
+            -d parse_mode="Markdown" \
+            -d text="$MESSAGE"
+
+      - name: Notify Failure on Telegram
+        if: failure()
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1 | sed 's/[_*\[\]()~`>#+=|{}.!-]/\\&/g')
+          
+          MESSAGE="❌ *Build Falhou*%0A%0A"
+          MESSAGE+="📦 *Repositório:* ${{ github.repository }}%0A"
+          MESSAGE+="🔀 *Branch:* ${{ github.ref_name }}%0A"
+          MESSAGE+="👤 *Autor:* ${{ github.actor }}%0A"
+          MESSAGE+="💬 *Commit:* ${COMMIT_MSG}%0A"
+          MESSAGE+="🔗 *Link:* https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="7514981639" \
+            -d parse_mode="Markdown" \
+            -d text="$MESSAGE"
+
