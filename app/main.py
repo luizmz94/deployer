@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -21,6 +21,9 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 TAIL_LIMIT = 2000
 
 STACK_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+SENSITIVE_RE = re.compile(
+    r"(?im)^(\\s*[^\\s:=]*(?:secret|token|password|passwd|pwd|key)[^:=]*?)\\s*[:=]\\s*([^\\n\\r]+)"
+)
 
 
 class Settings:
@@ -137,9 +140,27 @@ def verify_signature(signature_header: str, data: bytes) -> None:
         )
 
 
+def get_docker_env(stack_path: Path) -> Dict[str, str]:
+    cfg_dir = stack_path / ".docker"
+    cfg_file = cfg_dir / "config.json"
+    if cfg_file.exists():
+        return {"DOCKER_CONFIG": str(cfg_dir)}
+    return {}
+
+
 def run_command(name: str, args: List[str], cwd: Path, timeout: int) -> Dict[str, Any]:
+    return run_command_env(name, args, cwd, timeout, env=None)
+
+
+def run_command_env(
+    name: str, args: List[str], cwd: Path, timeout: int, env: Optional[Dict[str, str]]
+) -> Dict[str, Any]:
     started = time.time()
     try:
+        proc_env = os.environ.copy()
+        if env:
+            proc_env.update(env)
+
         proc = subprocess.run(
             args,
             cwd=str(cwd),
@@ -147,9 +168,13 @@ def run_command(name: str, args: List[str], cwd: Path, timeout: int) -> Dict[str
             text=True,
             timeout=timeout,
             check=False,
+            env=proc_env,
         )
         duration_ms = int((time.time() - started) * 1000)
-        output_combined = (proc.stdout or "") + (proc.stderr or "")
+        def sanitize_output(text: str) -> str:
+            return SENSITIVE_RE.sub(lambda m: f"{m.group(1)}: ***", text)
+
+        output_combined = sanitize_output((proc.stdout or "") + (proc.stderr or ""))
         tail = output_combined[-TAIL_LIMIT:]
         result = {
             "name": name,
@@ -205,16 +230,18 @@ def build_response(stack: str, steps: List[Dict[str, Any]], started_at: datetime
 async def perform_deploy(stack: str) -> JSONResponse:
     validate_stack_name(stack)
     stack_path = get_stack_path(stack)
+    docker_env = get_docker_env(stack_path)
     started_at = datetime.now(timezone.utc)
     log_event({"event": "deploy_start", "stack": stack})
 
     steps: List[Dict[str, Any]] = []
     status_result = await asyncio.to_thread(
-        run_command,
+        run_command_env,
         "status",
         ["docker", "compose", "ps", "--status=running", "--services"],
         stack_path,
         settings.status_timeout,
+        docker_env,
     )
     services = [line.strip() for line in status_result.get("tail", "").splitlines() if line.strip()]
     if status_result["ok"] and not services:
@@ -234,33 +261,36 @@ async def perform_deploy(stack: str) -> JSONResponse:
 
     steps.append(
         await asyncio.to_thread(
-            run_command,
+            run_command_env,
             "config",
             ["docker", "compose", "config"],
             stack_path,
             settings.config_timeout,
+            docker_env,
         )
     )
 
     if steps[-1]["ok"]:
         steps.append(
             await asyncio.to_thread(
-                run_command,
+                run_command_env,
                 "pull",
                 ["docker", "compose", "pull"],
                 stack_path,
                 settings.pull_timeout,
+                docker_env,
             )
         )
 
     if steps[-1]["ok"]:
         steps.append(
             await asyncio.to_thread(
-                run_command,
+                run_command_env,
                 "up",
                 ["docker", "compose", "up", "-d", "--remove-orphans"],
                 stack_path,
                 settings.up_timeout,
+                docker_env,
             )
         )
 

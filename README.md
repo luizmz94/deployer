@@ -14,6 +14,7 @@ Microserviço FastAPI que recebe webhooks assinados e executa `docker compose co
 ## Arquitetura de execução
 - O container monta `/var/run/docker.sock` para conversar com o Docker do host.
 - Os stacks do host `/opt/stacks` são montados como `/stacks` (read-only é suficiente).
+- Se precisar de auth de registry diferente por stack, coloque um `.docker/config.json` dentro do diretório do stack; o app usará `DOCKER_CONFIG=/stacks/<stack>/.docker`.
 - Cada deploy roda no diretório do stack (`cwd=/stacks/<stack>`):
   0. Checagem de status: `docker compose ps --status=running --services` (se nada rodando, aborta)
   1. `docker compose config`
