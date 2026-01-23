@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+Dockerfile
+.git
+.gitignore
+.idea
+.vscode
+*.log
+.cache
+.eggs
+*.egg-info
