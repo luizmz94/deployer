@@ -22,7 +22,7 @@ TAIL_LIMIT = 2000
 
 STACK_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 SENSITIVE_RE = re.compile(
-    r"(?im)^(\\s*[^\\s:=]*(?:secret|token|password|passwd|pwd|key)[^:=]*?)\\s*[:=]\\s*([^\\n\\r]+)"
+    r"(?im)^\s*([^\s:=]*(?:secret|token|password|passwd|pwd|key)[^:=]*?)\s*[:=]\s*([^\n\r]+)"
 )
 
 
@@ -232,7 +232,13 @@ async def perform_deploy(stack: str) -> JSONResponse:
     stack_path = get_stack_path(stack)
     docker_env = get_docker_env(stack_path)
     started_at = datetime.now(timezone.utc)
-    log_event({"event": "deploy_start", "stack": stack})
+    log_event(
+        {
+            "event": "deploy_start",
+            "stack": stack,
+            "docker_config": docker_env.get("DOCKER_CONFIG"),
+        }
+    )
 
     steps: List[Dict[str, Any]] = []
     status_result = await asyncio.to_thread(
