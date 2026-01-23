@@ -43,7 +43,7 @@ deployer git:(main) export $(grep -v '^#' .env | xargs) && uvicorn app.main:app 
 docker compose build
 docker compose up -d
 ```
-- Serviço escuta em `:8080` (mapeado no host). Healthcheck: `POST /health`.
+- Serviço escuta em `:8080` (mapeado no host). Healthcheck: `GET /health`.
 - Ajuste o publish da porta ou proteja atrás de proxy/firewall conforme sua exposição.
 
 ## Assinatura HMAC
@@ -61,7 +61,7 @@ curl -X POST http://host:8080/deploy \
 ```
 
 ## Endpoints
-- `POST /health` -> 200 OK.
+- `GET /health` (ou `POST /health`) -> 200 OK.
 - `POST /deploy/{stack}` -> dispara deploy; body pode ser vazio; assinar body vazio como o nome do stack.
 - `POST /deploy` com JSON `{ "stack": "media" }` (alternativa).
 
@@ -147,7 +147,7 @@ secrets/
 ```
 
 ## Saúde e observabilidade
-- Healthcheck no compose já chama `POST /health`.
+- Healthcheck no compose já chama `GET /health`.
 - Logs estruturados em stdout; agregadores podem coletar diretamente do container.
 
 ## Troubleshooting

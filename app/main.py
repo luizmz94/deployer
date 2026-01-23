@@ -274,7 +274,7 @@ async def perform_deploy(stack: str) -> JSONResponse:
     return build_response(stack, steps, started_at)
 
 
-@app.post("/health")
+@app.api_route("/health", methods=["GET", "POST"])
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
 

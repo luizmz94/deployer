@@ -1,22 +1,14 @@
 services:
   deployer:
-    build: .
-    image: local/deployer:latest
+    image: gitredware/deployer:latest
     container_name: deployer
     env_file:
-      - .env
-    environment:
-      - STACKS_ROOT=${STACKS_ROOT:-/stacks}
-      - RATE_LIMIT_PER_MIN=${RATE_LIMIT_PER_MIN:-10}
-      - STATUS_TIMEOUT=${STATUS_TIMEOUT:-60}
-      - CONFIG_TIMEOUT=${CONFIG_TIMEOUT:-120}
-      - PULL_TIMEOUT=${PULL_TIMEOUT:-600}
-      - UP_TIMEOUT=${UP_TIMEOUT:-600}
+      - stack.env
     ports:
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/stacks:/stacks:ro
+      - /home/docker/stacks:/stacks:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
