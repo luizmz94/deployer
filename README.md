@@ -33,6 +33,11 @@ UP_TIMEOUT=600
 ```
 > Não versionar secrets: `.env` e `secrets/` ficam só no host. Use `.gitignore` no repositório dos stacks para evitar commit de `.env`, `secrets/` etc.
 
+## Local test
+```
+deployer git:(main) export $(grep -v '^#' .env | xargs) && uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
 ## Build e subida
 ```
 docker compose build
