@@ -4,6 +4,7 @@ Microserviço FastAPI que recebe webhooks assinados e executa `docker compose co
 
 ## Requisitos e segurança
 - Necessário Docker com Docker Compose v2 no host (exposto pelo socket `docker.sock`).
+- A imagem já traz `docker` CLI + `docker compose` plugin instalados para falar com o socket do host.
 - Fail-closed: se `DEPLOY_SECRET` estiver vazio ou `STACKS_ROOT` não existir, o container nem inicia.
 - Só roda deploy de stacks que existam em `/stacks/<stack>` **e já tenham serviços em execução** (checagem prévia via `docker compose ps --status=running`).
 - HMAC obrigatório no header `X-Signature` com `hex(hmac_sha256(DEPLOY_SECRET, raw_body))`.
