@@ -16,6 +16,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from app.vault_client import VaultClient
+from app.compose_parser import extract_env_vars_from_compose
+
 # Configuration defaults
 RATE_LIMIT_WINDOW_SECONDS = 60
 TAIL_LIMIT = 2000
@@ -35,6 +38,11 @@ class Settings:
         self.config_timeout = int(os.environ.get("CONFIG_TIMEOUT", "120"))
         self.pull_timeout = int(os.environ.get("PULL_TIMEOUT", "600"))
         self.up_timeout = int(os.environ.get("UP_TIMEOUT", "600"))
+        
+        # Vault AppRole (opcional)
+        self.vault_addr = os.environ.get("VAULT_ADDR", "")
+        self.vault_role_id = os.environ.get("VAULT_ROLE_ID", "")
+        self.vault_secret_id = os.environ.get("VAULT_SECRET_ID", "")
 
         if not self.deploy_secret:
             raise SystemExit("DEPLOY_SECRET must be set (fail-closed).")
@@ -54,6 +62,19 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 def log_event(event: Dict[str, Any]) -> None:
     payload = {"ts": datetime.now(timezone.utc).isoformat(), **event}
     logger.info(json.dumps(payload, default=str))
+
+
+# Inicializar VaultClient se as credenciais estiverem configuradas
+vault_client: Optional[VaultClient] = None
+if settings.vault_addr and settings.vault_role_id and settings.vault_secret_id:
+    vault_client = VaultClient(
+        addr=settings.vault_addr,
+        role_id=settings.vault_role_id,
+        secret_id=settings.vault_secret_id
+    )
+    log_event({"event": "vault_client_initialized", "addr": settings.vault_addr})
+else:
+    log_event({"event": "vault_client_disabled", "reason": "missing_credentials"})
 
 
 # Rate limiter
@@ -148,6 +169,21 @@ def get_docker_env(stack_path: Path) -> Dict[str, str]:
     return {}
 
 
+def infer_vault_paths(stack_name: str) -> List[str]:
+    """
+    Converte o nome da stack para path do Vault.
+    
+    Padrão: nome da stack/pasta usa hífen, path do Vault usa barra.
+    
+    Exemplos:
+      - prd-thread_db -> ["prd/thread_db"]
+      - others-deployer -> ["others/deployer"]
+      - prd-thread_hasura -> ["prd/thread_hasura"]
+    """
+    vault_path = stack_name.replace('-', '/')
+    return [vault_path]
+
+
 def run_command(name: str, args: List[str], cwd: Path, timeout: int) -> Dict[str, Any]:
     return run_command_env(name, args, cwd, timeout, env=None)
 
@@ -239,6 +275,71 @@ async def perform_deploy(stack: str) -> JSONResponse:
             "docker_config": docker_env.get("DOCKER_CONFIG"),
         }
     )
+    
+    # Buscar secrets do Vault se configurado
+    if vault_client:
+        compose_file = stack_path / "docker-compose.yml"
+        
+        # 1. Extrair variáveis necessárias do docker-compose.yml
+        required_vars = extract_env_vars_from_compose(compose_file)
+        log_event({
+            "event": "compose_vars_detected",
+            "stack": stack,
+            "vars": sorted(list(required_vars)),
+            "count": len(required_vars)
+        })
+        
+        # 2. Inferir paths do Vault baseado no nome da stack
+        vault_paths = infer_vault_paths(stack)
+        log_event({
+            "event": "vault_paths_inferred",
+            "stack": stack,
+            "paths": vault_paths
+        })
+        
+        # 3. Buscar secrets de todos os paths
+        try:
+            vault_secrets = await asyncio.to_thread(
+                vault_client.get_all_secrets_for_stack,
+                stack,
+                vault_paths
+            )
+            
+            # 4. Filtrar apenas as secrets que o compose precisa
+            filtered_secrets = {
+                key: value 
+                for key, value in vault_secrets.items() 
+                if key in required_vars
+            }
+            
+            # 5. Logar secrets encontradas vs necessárias
+            missing_vars = required_vars - set(filtered_secrets.keys())
+            if missing_vars:
+                log_event({
+                    "event": "vault_secrets_missing",
+                    "stack": stack,
+                    "missing": sorted(list(missing_vars))
+                })
+            
+            log_event({
+                "event": "vault_secrets_ready",
+                "stack": stack,
+                "found": len(filtered_secrets),
+                "required": len(required_vars),
+                "missing": len(missing_vars)
+            })
+            
+            # 6. Injetar secrets no docker_env
+            docker_env.update(filtered_secrets)
+            
+        except Exception as e:
+            log_event({
+                "event": "vault_secrets_failed",
+                "stack": stack,
+                "error": str(e)
+            })
+            # Não falhar o deploy, apenas logar o erro
+            # Algumas stacks podem não precisar de secrets do Vault
 
     steps: List[Dict[str, Any]] = []
     status_result = await asyncio.to_thread(
