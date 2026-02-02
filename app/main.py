@@ -252,9 +252,19 @@ def run_command_env(
 def build_response(stack: str, steps: List[Dict[str, Any]], started_at: datetime) -> JSONResponse:
     finished_at = datetime.now(timezone.utc)
     ok = all(step.get("ok") for step in steps)
+    
+    # Criar resumo dos steps executados
+    summary = {
+        "total": len(steps),
+        "completed": [s["name"] for s in steps if s.get("ok")],
+        "failed": [s["name"] for s in steps if not s.get("ok")],
+        "duration_ms": sum(s.get("duration_ms", 0) for s in steps)
+    }
+    
     content = {
         "ok": ok,
         "stack": stack,
+        "summary": summary,
         "steps": steps,
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
@@ -366,16 +376,18 @@ async def perform_deploy(stack: str) -> JSONResponse:
         )
         return build_response(stack, steps, started_at)
 
-    steps.append(
-        await asyncio.to_thread(
-            run_command_env,
-            "config",
-            ["docker", "compose", "config"],
-            stack_path,
-            settings.config_timeout,
-            docker_env,
-        )
+    config_step = await asyncio.to_thread(
+        run_command_env,
+        "config",
+        ["docker", "compose", "config"],
+        stack_path,
+        settings.config_timeout,
+        docker_env,
     )
+    # Limitar output do config para evitar truncamento na resposta
+    if config_step["ok"] and len(config_step.get("tail", "")) > 500:
+        config_step["tail"] = config_step["tail"][:500] + "\n... (output truncated, config valid)"
+    steps.append(config_step)
 
     if steps[-1]["ok"]:
         steps.append(
